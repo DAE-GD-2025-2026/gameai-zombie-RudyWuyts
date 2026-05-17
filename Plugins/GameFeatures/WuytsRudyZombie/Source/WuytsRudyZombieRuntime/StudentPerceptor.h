@@ -23,4 +23,19 @@ public:
 
 	UFUNCTION()
 	virtual void OnPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
+
+protected:
+	// Cached references to avoid repeated lookups
+	UPROPERTY()
+	class AAIController* CachedController = nullptr;
+
+	UPROPERTY()
+	class UBlackboardComponent* CachedBlackboard = nullptr;
+
+	UPROPERTY()
+	class UBehaviorTreeComponent* CachedBehaviorTree = nullptr;
+
+	// Name of the blackboard key to set when we perceive an actor
+	UPROPERTY(EditAnywhere, Category = "Perception")
+	FName BlackboardTargetKey = FName(TEXT("TargetActor"));
 };
