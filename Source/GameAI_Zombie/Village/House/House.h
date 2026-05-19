@@ -6,6 +6,12 @@
 #include "GameFramework/Actor.h"
 #include "House.generated.h"
 
+struct FHouseBounds
+{
+	FVector Origin;
+	FVector Extent;
+};
+
 UCLASS()
 class GAMEAI_ZOMBIE_API AHouse : public AActor
 {
@@ -18,8 +24,10 @@ public:
 protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
+	
 
 public:
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
+	FHouseBounds GetBounds() const;
 };
