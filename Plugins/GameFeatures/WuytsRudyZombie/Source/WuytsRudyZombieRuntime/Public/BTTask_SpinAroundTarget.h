@@ -6,6 +6,8 @@
 #include "BTTask_SpinAroundTarget.generated.h"
 
 class AActor;
+class UBlackboardComponent;
+class UStudentPerceptor;
 
 USTRUCT()
 struct FBTSpinMemory
@@ -14,11 +16,13 @@ struct FBTSpinMemory
 
     float AccumulatedDeg;
     TWeakObjectPtr<AActor> TargetActor;
+    FString TargetItemType;
     FVector InitialOffset;
 
     FBTSpinMemory()
         : AccumulatedDeg(0.f)
         , TargetActor(nullptr)
+        , TargetItemType()
         , InitialOffset(FVector::ZeroVector)
     {}
 };
@@ -38,6 +42,14 @@ public:
     // Blackboard key that points to the target Actor to spin around
     UPROPERTY(EditAnywhere, Category = "Spin")
     FBlackboardKeySelector TargetKey;
+
+    // Blackboard key that receives the nearest stimulus location after the spin completes
+    UPROPERTY(EditAnywhere, Category = "Spin")
+    FBlackboardKeySelector PositionTargetKey;
+
+    // Blackboard key that receives the type of the selected target actor
+    UPROPERTY(EditAnywhere, Category = "Spin")
+    FBlackboardKeySelector TargetItemTypeKey;
 
     // Degrees per second to rotate (around Z axis)
     UPROPERTY(EditAnywhere, Category = "Spin")

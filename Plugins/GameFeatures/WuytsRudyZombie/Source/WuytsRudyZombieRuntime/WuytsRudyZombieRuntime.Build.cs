@@ -1,5 +1,6 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
+using System.IO;
 using UnrealBuildTool;
 
 public class WuytsRudyZombieRuntime : ModuleRules
@@ -39,6 +40,9 @@ public class WuytsRudyZombieRuntime : ModuleRules
 				"Slate",
 				"SlateCore",
 				"AIModule",
+				"NavigationSystem",
+				// Depend on the game module so we can include its public headers
+				"GameAI_Zombie",
 				// ... add private dependencies that you statically link with here ...	
 			}
 			);

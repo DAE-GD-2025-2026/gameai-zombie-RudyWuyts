@@ -10,6 +10,52 @@
 #include "Perception/AISense_Damage.h"
 #include "StudentPerceptor.generated.h"
 
+class AAIController;
+class AActor;
+class UBehaviorTreeComponent;
+class UBlackboardComponent;
+
+USTRUCT()
+struct FCapturedStimulus
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	TWeakObjectPtr<AActor> Actor;
+
+	UPROPERTY()
+	FString ActorName;
+
+	UPROPERTY()
+	FString ItemType;
+
+	UPROPERTY()
+	FVector Location = FVector::ZeroVector;
+
+	bool IsHouse() const
+	{
+		return ItemType.Equals(TEXT("House"), ESearchCase::IgnoreCase);
+	}
+
+	bool IsGarbage() const
+	{
+		return ItemType.Equals(TEXT("Garbage"), ESearchCase::IgnoreCase);
+	}
+
+	bool IsZombie() const
+	{
+		return ItemType.Equals(TEXT("Zombie"), ESearchCase::IgnoreCase);
+	}
+
+	bool IsValidTarget() const
+	{
+		return !IsGarbage() && !IsZombie() && (IsHouse() || ItemType.Equals(TEXT("Food"), ESearchCase::IgnoreCase)
+			|| ItemType.Equals(TEXT("Medkit"), ESearchCase::IgnoreCase)
+			|| ItemType.Equals(TEXT("Shotgun"), ESearchCase::IgnoreCase)
+			|| ItemType.Equals(TEXT("Pistol"), ESearchCase::IgnoreCase));
+	}
+};
+
 UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))
 class WUYTSRUDYZOMBIERUNTIME_API UStudentPerceptor : public UActorComponent
 {
@@ -24,7 +70,22 @@ public:
 	UFUNCTION()
 	virtual void OnPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
 
+	void StartStimulusCapture();
+	void StartStimulusCapture(const FString& HouseActorName);
+	void StopStimulusCapture();
+	bool GetNearestCapturedStimulus(const FVector& Origin, FCapturedStimulus& OutStimulus) const;
+	bool GetNextRememberedHouse(const FString& CurrentHouseActorName, FCapturedStimulus& OutStimulus) const;
+	bool GetNextQueuedPickupForActiveHouse(FCapturedStimulus& OutStimulus) const;
+	FString GetActiveHouseActorName() const;
+	bool GetNearestCapturedStimulusLocation(const FVector& Origin, FVector& OutLocation) const;
+	void SeedCapturedStimuliFromCurrentPerception();
+	void MarkStimulusVisited(const FString& VisitedActorName, const FVector& VisitedLocation);
+
 protected:
+	bool HasCapturedStimulus(const FString& ActorName, const FVector& StimulusLocation) const;
+	bool IsStimulusVisited(const FString& ActorName, const FVector& StimulusLocation) const;
+	void ForgetNonHouseStimuli();
+
 	// Cached references to avoid repeated lookups
 	UPROPERTY()
 	class AAIController* CachedController = nullptr;
@@ -35,7 +96,20 @@ protected:
 	UPROPERTY()
 	class UBehaviorTreeComponent* CachedBehaviorTree = nullptr;
 
+	UPROPERTY()
+	class UAIPerceptionComponent* CachedPerceptionComponent = nullptr;
+
 	// Name of the blackboard key to set when we perceive an actor
 	UPROPERTY(EditAnywhere, Category = "Perception")
 	FName BlackboardTargetKey = FName(TEXT("TargetActor"));
+
+	UPROPERTY(EditAnywhere, Category = "Perception")
+	FName BlackboardTargetTypeKey = FName(TEXT("TargetItemType"));
+
+	bool bIsCapturingStimuli = false;
+	FString ActiveHouseActorName;
+	TArray<FCapturedStimulus> CapturedStimuli;
+	TArray<FCapturedStimulus> VisitedStimuli;
+	TArray<FCapturedStimulus> KnownHouseStimuli;
+	TMap<FString, TArray<FCapturedStimulus>> HousePickupQueues;
 };

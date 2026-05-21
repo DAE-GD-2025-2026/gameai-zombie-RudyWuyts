@@ -1,5 +1,8 @@
 #include "BTTask_SpinAroundTarget.h"
+#include "../StudentPerceptor.h"
 #include "BehaviorTree/BlackboardComponent.h"
+#include "BehaviorTree/Blackboard/BlackboardKeyType_String.h"
+#include "BehaviorTree/Blackboard/BlackboardKeyType_Vector.h"
 #include "AIController.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/Actor.h"
@@ -17,11 +20,13 @@ UBTTask_SpinAroundTarget::UBTTask_SpinAroundTarget()
 
     // Restrict the blackboard key to Actor types in editor
     TargetKey.AddObjectFilter(this, GET_MEMBER_NAME_CHECKED(UBTTask_SpinAroundTarget, TargetKey), AActor::StaticClass());
+    PositionTargetKey.AddVectorFilter(this, GET_MEMBER_NAME_CHECKED(UBTTask_SpinAroundTarget, PositionTargetKey));
+    TargetItemTypeKey.AddStringFilter(this, GET_MEMBER_NAME_CHECKED(UBTTask_SpinAroundTarget, TargetItemTypeKey));
 }
 
 EBTNodeResult::Type UBTTask_SpinAroundTarget::ExecuteTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory)
 {
-    FBTSpinMemory* MyMemory = (FBTSpinMemory*)NodeMemory;
+    FBTSpinMemory* MyMemory = reinterpret_cast<FBTSpinMemory*>(NodeMemory);
     MyMemory->AccumulatedDeg = 0.f;
 
     UBlackboardComponent* BlackboardComp = OwnerComp.GetBlackboardComponent();
@@ -31,16 +36,9 @@ EBTNodeResult::Type UBTTask_SpinAroundTarget::ExecuteTask(UBehaviorTreeComponent
         return EBTNodeResult::Failed;
     }
 
-    UObject* Obj = nullptr;
-    if (TargetKey.SelectedKeyName.IsNone())
-    {
-        // fallback to common default key name
-        Obj = BlackboardComp->GetValueAsObject(FName("SelfActor"));
-    }
-    else
-    {
-        Obj = BlackboardComp->GetValueAsObject(TargetKey.SelectedKeyName);
-    }
+    UObject* Obj = BlackboardComp->GetValueAsObject(TargetKey.SelectedKeyName.IsNone()
+        ? FName(TEXT("TargetActor"))
+        : TargetKey.SelectedKeyName);
 
     AActor* Target = Cast<AActor>(Obj);
     if (!Target)
@@ -50,12 +48,28 @@ EBTNodeResult::Type UBTTask_SpinAroundTarget::ExecuteTask(UBehaviorTreeComponent
     }
 
     MyMemory->TargetActor = Target;
+    MyMemory->TargetItemType = BlackboardComp->GetValueAsString(TargetItemTypeKey.SelectedKeyName.IsNone()
+        ? FName(TEXT("TargetItemType"))
+        : TargetItemTypeKey.SelectedKeyName);
 
-    AAIController* AICon = OwnerComp.GetAIOwner();
-    if (AICon)
+    if (APawn* Pawn = OwnerComp.GetAIOwner() ? OwnerComp.GetAIOwner()->GetPawn() : nullptr)
     {
-        APawn* Pawn = AICon->GetPawn();
-        if (Pawn)
+        if (UStudentPerceptor* Perceptor = Pawn->FindComponentByClass<UStudentPerceptor>())
+        {
+            if (MyMemory->TargetItemType.Equals(TEXT("House"), ESearchCase::IgnoreCase))
+            {
+                Perceptor->StartStimulusCapture(Target->GetName());
+            }
+            else
+            {
+                Perceptor->StartStimulusCapture();
+            }
+        }
+    }
+
+    if (AAIController* AICon = OwnerComp.GetAIOwner())
+    {
+        if (APawn* Pawn = AICon->GetPawn())
         {
             AICon->StopMovement();
         }
@@ -68,7 +82,8 @@ EBTNodeResult::Type UBTTask_SpinAroundTarget::ExecuteTask(UBehaviorTreeComponent
 
 void UBTTask_SpinAroundTarget::TickTask(UBehaviorTreeComponent& OwnerComp, uint8* NodeMemory, float DeltaSeconds)
 {
-    FBTSpinMemory* MyMemory = (FBTSpinMemory*)NodeMemory;
+    FBTSpinMemory* MyMemory = reinterpret_cast<FBTSpinMemory*>(NodeMemory);
+    UBlackboardComponent* BlackboardComp = OwnerComp.GetBlackboardComponent();
 
     AAIController* AICon = OwnerComp.GetAIOwner();
     if (!AICon)
@@ -87,6 +102,11 @@ void UBTTask_SpinAroundTarget::TickTask(UBehaviorTreeComponent& OwnerComp, uint8
     AActor* Target = MyMemory->TargetActor.Get();
     if (!Target)
     {
+        if (UStudentPerceptor* Perceptor = Pawn->FindComponentByClass<UStudentPerceptor>())
+        {
+            Perceptor->StopStimulusCapture();
+        }
+
         FinishLatentTask(OwnerComp, EBTNodeResult::Failed);
         return;
     }
@@ -101,9 +121,74 @@ void UBTTask_SpinAroundTarget::TickTask(UBehaviorTreeComponent& OwnerComp, uint8
         MoveComp->Velocity = FVector::ZeroVector;
     }
 
-    if (MyMemory->AccumulatedDeg >= 360.f)
+    if (MyMemory->AccumulatedDeg < 360.f)
     {
-        UE_LOG(LogBTSpin, Log, TEXT("SpinAround: Completed 360 degrees"));
-        FinishLatentTask(OwnerComp, EBTNodeResult::Succeeded);
+        return;
     }
+
+    UE_LOG(LogBTSpin, Log, TEXT("SpinAround: Completed 360 degrees"));
+
+    if (UStudentPerceptor* Perceptor = Pawn->FindComponentByClass<UStudentPerceptor>())
+    {
+        Perceptor->StopStimulusCapture();
+
+        FCapturedStimulus NextTarget;
+        if (Perceptor->GetNextQueuedPickupForActiveHouse(NextTarget))
+        {
+            const FName TargetActorKeyName = TargetKey.SelectedKeyName.IsNone()
+                ? FName(TEXT("TargetActor"))
+                : TargetKey.SelectedKeyName;
+            const FName PositionKeyName = PositionTargetKey.SelectedKeyName.IsNone()
+                ? FName(TEXT("PositionTarget"))
+                : PositionTargetKey.SelectedKeyName;
+            const FName TargetTypeKeyName = TargetItemTypeKey.SelectedKeyName.IsNone()
+                ? FName(TEXT("TargetItemType"))
+                : TargetItemTypeKey.SelectedKeyName;
+
+            if (BlackboardComp)
+            {
+                BlackboardComp->SetValueAsObject(TargetActorKeyName, NextTarget.Actor.Get());
+                BlackboardComp->SetValueAsVector(PositionKeyName, NextTarget.Location);
+                BlackboardComp->SetValueAsString(TargetTypeKeyName, NextTarget.ItemType);
+                UE_LOG(LogBTSpin, Log, TEXT("SpinAround: Queued pickup target %s type %s location %s"), *NextTarget.ActorName, *NextTarget.ItemType, *NextTarget.Location.ToString());
+                FinishLatentTask(OwnerComp, EBTNodeResult::Succeeded);
+                return;
+            }
+
+            UE_LOG(LogBTSpin, Warning, TEXT("SpinAround: Blackboard missing when trying to write queued pickup target"));
+            FinishLatentTask(OwnerComp, EBTNodeResult::Failed);
+            return;
+        }
+
+        FCapturedStimulus NextHouse;
+        if (Perceptor->GetNextRememberedHouse(Perceptor->GetActiveHouseActorName(), NextHouse))
+        {
+            const FName TargetActorKeyName = TargetKey.SelectedKeyName.IsNone()
+                ? FName(TEXT("TargetActor"))
+                : TargetKey.SelectedKeyName;
+            const FName PositionKeyName = PositionTargetKey.SelectedKeyName.IsNone()
+                ? FName(TEXT("PositionTarget"))
+                : PositionTargetKey.SelectedKeyName;
+            const FName TargetTypeKeyName = TargetItemTypeKey.SelectedKeyName.IsNone()
+                ? FName(TEXT("TargetItemType"))
+                : TargetItemTypeKey.SelectedKeyName;
+
+            if (BlackboardComp)
+            {
+                BlackboardComp->SetValueAsObject(TargetActorKeyName, NextHouse.Actor.Get());
+                BlackboardComp->SetValueAsVector(PositionKeyName, NextHouse.Location);
+                BlackboardComp->SetValueAsString(TargetTypeKeyName, NextHouse.ItemType);
+                UE_LOG(LogBTSpin, Log, TEXT("SpinAround: No pickup queue, falling back to remembered house %s at %s"), *NextHouse.ActorName, *NextHouse.Location.ToString());
+                FinishLatentTask(OwnerComp, EBTNodeResult::Succeeded);
+                return;
+            }
+
+            UE_LOG(LogBTSpin, Warning, TEXT("SpinAround: Blackboard missing when trying to write fallback house target"));
+            FinishLatentTask(OwnerComp, EBTNodeResult::Failed);
+            return;
+        }
+    }
+
+    UE_LOG(LogBTSpin, Warning, TEXT("SpinAround: No queued pickup and no remembered house was available"));
+    FinishLatentTask(OwnerComp, EBTNodeResult::Failed);
 }
