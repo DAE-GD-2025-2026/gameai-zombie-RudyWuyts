@@ -111,6 +111,15 @@ void UBTTask_SpinAroundTarget::TickTask(UBehaviorTreeComponent& OwnerComp, uint8
         return;
     }
 
+    // Continuously refresh items during the spin to capture anything newly perceived
+    if (UStudentPerceptor* Perceptor = Pawn->FindComponentByClass<UStudentPerceptor>())
+    {
+        if (MyMemory->TargetItemType.Equals(TEXT("House"), ESearchCase::IgnoreCase))
+        {
+            Perceptor->RefreshActiveHousePickupQueue();
+        }
+    }
+
     const float Step = RotationSpeedDegPerSec * DeltaSeconds;
     MyMemory->AccumulatedDeg += Step;
 
@@ -132,6 +141,13 @@ void UBTTask_SpinAroundTarget::TickTask(UBehaviorTreeComponent& OwnerComp, uint8
     {
         Perceptor->StopStimulusCapture();
 
+        // Final refresh to catch any last items
+        if (MyMemory->TargetItemType.Equals(TEXT("House"), ESearchCase::IgnoreCase))
+        {
+            Perceptor->RefreshActiveHousePickupQueue();
+        }
+
+        // First, try to get a queued pickup for this house
         FCapturedStimulus NextTarget;
         if (Perceptor->GetNextQueuedPickupForActiveHouse(NextTarget))
         {
@@ -160,6 +176,9 @@ void UBTTask_SpinAroundTarget::TickTask(UBehaviorTreeComponent& OwnerComp, uint8
             return;
         }
 
+        UE_LOG(LogBTSpin, Warning, TEXT("SpinAround: No pickup queue found for active house %s"), *Perceptor->GetActiveHouseActorName());
+
+        // If no pickups queued for this house, try to find next house
         FCapturedStimulus NextHouse;
         if (Perceptor->GetNextRememberedHouse(Perceptor->GetActiveHouseActorName(), NextHouse))
         {
@@ -187,8 +206,13 @@ void UBTTask_SpinAroundTarget::TickTask(UBehaviorTreeComponent& OwnerComp, uint8
             FinishLatentTask(OwnerComp, EBTNodeResult::Failed);
             return;
         }
+
+        // No pickups and no next house - this is expected if this is the last house
+        UE_LOG(LogBTSpin, Log, TEXT("SpinAround: No queued pickup and no remembered house was available. Ending with success."));
+        FinishLatentTask(OwnerComp, EBTNodeResult::Succeeded);
+        return;
     }
 
-    UE_LOG(LogBTSpin, Warning, TEXT("SpinAround: No queued pickup and no remembered house was available"));
+    UE_LOG(LogBTSpin, Warning, TEXT("SpinAround: StudentPerceptor not found when completing spin"));
     FinishLatentTask(OwnerComp, EBTNodeResult::Failed);
 }

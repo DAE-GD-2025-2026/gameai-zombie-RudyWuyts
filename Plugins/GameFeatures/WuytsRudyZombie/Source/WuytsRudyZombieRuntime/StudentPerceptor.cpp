@@ -18,7 +18,7 @@ UStudentPerceptor::UStudentPerceptor()
 void UStudentPerceptor::BeginPlay()
 {
 	Super::BeginPlay();
-	
+
 	if (auto PerceptionComp = GetOwner()->GetComponentByClass<UAIPerceptionComponent>())
 	{
 		CachedPerceptionComponent = PerceptionComp;
@@ -35,6 +35,14 @@ void UStudentPerceptor::BeginPlay()
 			CachedBehaviorTree = Cast<UBehaviorTreeComponent>(CachedController->BrainComponent);
 		}
 	}
+}
+
+void UStudentPerceptor::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+	// Continuously discover houses during the game
+	ContinuouslyDiscoverHouses();
 }
 
 void UStudentPerceptor::StartStimulusCapture()
@@ -58,6 +66,55 @@ void UStudentPerceptor::StopStimulusCapture()
 {
 	bIsCapturingStimuli = false;
 	ForgetNonHouseStimuli();
+}
+
+void UStudentPerceptor::ContinuouslyDiscoverHouses()
+{
+	if (!CachedPerceptionComponent)
+	{
+		return;
+	}
+
+	// Get all currently perceived actors
+	TArray<AActor*> PerceivedActors;
+	CachedPerceptionComponent->GetCurrentlyPerceivedActors(UAISense_Sight::StaticClass(), PerceivedActors);
+
+	// Discover houses from perception and add them to the known house list
+	for (AActor* Actor : PerceivedActors)
+	{
+		if (!Actor)
+			continue;
+
+		const FString ActorName = Actor->GetName();
+		if (!ActorName.Contains(TEXT("House"), ESearchCase::IgnoreCase))
+			continue;
+
+		// Create a stimulus for this house
+		const FCapturedStimulus HouseStimulus
+		{
+			Actor,
+			ActorName,
+			TEXT("House"),
+			Actor->GetActorLocation()
+		};
+
+		// Add to known houses if not already there
+		bool bAlreadyKnown = false;
+		for (const FCapturedStimulus& KnownHouse : KnownHouseStimuli)
+		{
+			if (KnownHouse.ActorName.Equals(ActorName, ESearchCase::IgnoreCase)
+				&& FVector::DistSquared(KnownHouse.Location, HouseStimulus.Location) <= FMath::Square(100.f))
+			{
+				bAlreadyKnown = true;
+				break;
+			}
+		}
+
+		if (!bAlreadyKnown)
+		{
+			KnownHouseStimuli.Add(HouseStimulus);
+		}
+	}
 }
 
 namespace
@@ -251,11 +308,14 @@ void UStudentPerceptor::SeedCapturedStimuliFromCurrentPerception()
 {
 	if (!CachedPerceptionComponent)
 	{
+		UE_LOG(LogTemp, Warning, TEXT("SeedCapturedStimuliFromCurrentPerception: CachedPerceptionComponent is null"));
 		return;
 	}
 
 	TArray<AActor*> PerceivedActors;
 	CachedPerceptionComponent->GetCurrentlyPerceivedActors(UAISense_Sight::StaticClass(), PerceivedActors);
+
+	UE_LOG(LogTemp, Log, TEXT("SeedCapturedStimuliFromCurrentPerception: Found %d perceived actors, ActiveHouse=%s"), PerceivedActors.Num(), *ActiveHouseActorName);
 
 	for (AActor* PerceivedActor : PerceivedActors)
 	{
@@ -270,7 +330,7 @@ void UStudentPerceptor::SeedCapturedStimuliFromCurrentPerception()
 
 			const FCapturedStimulus Stimulus
 			{
- 				PerceivedActor,
+				PerceivedActor,
 				ActorName,
 				ItemType,
 				PerceivedActor->GetActorLocation()
@@ -309,6 +369,100 @@ void UStudentPerceptor::MarkStimulusVisited(const FString& VisitedActorName, con
 		return Stimulus.ActorName.Equals(VisitedStimulus.ActorName, ESearchCase::IgnoreCase)
 			&& FVector::DistSquared(Stimulus.Location, VisitedStimulus.Location) <= FMath::Square(100.f);
 	});
+}
+
+void UStudentPerceptor::RefreshActiveHousePickupQueue()
+{
+	if (ActiveHouseActorName.IsEmpty())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("RefreshActiveHousePickupQueue: No active house"));
+		return;
+	}
+
+	TArray<FCapturedStimulus>& Queue = HousePickupQueues.FindOrAdd(ActiveHouseActorName);
+
+	// Add any valid pickup items from CapturedStimuli that aren't already in the queue and haven't been visited
+	int32 AddedCount = 0;
+	for (const FCapturedStimulus& Stimulus : CapturedStimuli)
+	{
+		// Skip if not a pickup item type
+		if (!IsPickupItemType(Stimulus.ItemType))
+		{
+			continue;
+		}
+
+		// Skip if already visited
+		if (IsStimulusVisited(Stimulus.ActorName, Stimulus.Location))
+		{
+			continue;
+		}
+
+		// Check if already in queue for this house
+		bool bAlreadyInQueue = false;
+		for (const FCapturedStimulus& QueuedItem : Queue)
+		{
+			if (QueuedItem.ActorName.Equals(Stimulus.ActorName, ESearchCase::IgnoreCase)
+				&& FVector::DistSquared(QueuedItem.Location, Stimulus.Location) <= FMath::Square(100.f))
+			{
+				bAlreadyInQueue = true;
+				break;
+			}
+		}
+
+		if (!bAlreadyInQueue)
+		{
+			Queue.Add(Stimulus);
+			AddedCount++;
+		}
+	}
+}
+
+void UStudentPerceptor::SetFoundItemsForCurrentHouse(const TArray<AActor*>& Items)
+{
+	FoundItems.Empty();
+	CurrentFoundItemIndex = 0;
+
+	for (AActor* Item : Items)
+	{
+		if (Item)
+		{
+			FoundItems.Add(Item);
+		}
+	}
+}
+
+bool UStudentPerceptor::GetNextFoundItem(AActor*& OutActor, FVector& OutLocation, FString& OutItemType)
+{
+	if (CurrentFoundItemIndex >= FoundItems.Num())
+	{
+		return false;
+	}
+
+	AActor* Item = FoundItems[CurrentFoundItemIndex];
+	if (!Item)
+	{
+		return false;
+	}
+
+	OutActor = Item;
+	OutLocation = Item->GetActorLocation();
+	OutItemType = ResolveStimulusType(Item->GetName());
+
+	return true;
+}
+
+void UStudentPerceptor::RemoveCurrentFoundItem()
+{
+	if (CurrentFoundItemIndex < FoundItems.Num())
+	{
+		FoundItems.RemoveAt(CurrentFoundItemIndex);
+		// Don't increment index since we removed the current item
+	}
+}
+
+int32 UStudentPerceptor::GetFoundItemCount() const
+{
+	return FoundItems.Num();
 }
 
 bool UStudentPerceptor::HasCapturedStimulus(const FString& ActorName, const FVector& StimulusLocation) const

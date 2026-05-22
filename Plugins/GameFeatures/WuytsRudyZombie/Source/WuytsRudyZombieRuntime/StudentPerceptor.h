@@ -64,8 +64,9 @@ class WUYTSRUDYZOMBIERUNTIME_API UStudentPerceptor : public UActorComponent
 public:
 	// Sets default values for this component's properties
 	UStudentPerceptor();
-	
+
 	virtual void BeginPlay() override;
+	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 	UFUNCTION()
 	virtual void OnPerceptionUpdated(AActor* Actor, FAIStimulus Stimulus);
@@ -73,6 +74,7 @@ public:
 	void StartStimulusCapture();
 	void StartStimulusCapture(const FString& HouseActorName);
 	void StopStimulusCapture();
+	void ContinuouslyDiscoverHouses();
 	bool GetNearestCapturedStimulus(const FVector& Origin, FCapturedStimulus& OutStimulus) const;
 	bool GetNextRememberedHouse(const FString& CurrentHouseActorName, FCapturedStimulus& OutStimulus) const;
 	bool GetNextQueuedPickupForActiveHouse(FCapturedStimulus& OutStimulus) const;
@@ -80,6 +82,13 @@ public:
 	bool GetNearestCapturedStimulusLocation(const FVector& Origin, FVector& OutLocation) const;
 	void SeedCapturedStimuliFromCurrentPerception();
 	void MarkStimulusVisited(const FString& VisitedActorName, const FVector& VisitedLocation);
+	void RefreshActiveHousePickupQueue();
+
+	// Found items management for quick-scan in houses
+	void SetFoundItemsForCurrentHouse(const TArray<AActor*>& Items);
+	bool GetNextFoundItem(AActor*& OutActor, FVector& OutLocation, FString& OutItemType);
+	void RemoveCurrentFoundItem();
+	int32 GetFoundItemCount() const;
 
 protected:
 	bool HasCapturedStimulus(const FString& ActorName, const FVector& StimulusLocation) const;
@@ -112,4 +121,8 @@ protected:
 	TArray<FCapturedStimulus> VisitedStimuli;
 	TArray<FCapturedStimulus> KnownHouseStimuli;
 	TMap<FString, TArray<FCapturedStimulus>> HousePickupQueues;
+
+	// Found items from quick scan
+	TArray<AActor*> FoundItems;
+	int32 CurrentFoundItemIndex = 0;
 };
