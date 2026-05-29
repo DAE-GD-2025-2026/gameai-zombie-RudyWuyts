@@ -35,7 +35,5 @@ void AShotgun::UseItem(ASurvivorPawn& Survivor)
 			bHasHitAnyShot = true;
 		}
 	}
-	
-	// TODO hitting & missing score
 }
 
